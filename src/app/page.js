@@ -23,31 +23,64 @@ export default function Home() {
   useEffect(() => {
     const client = createClient();
     if (!client) {
-      setError('Supabase is not configured. Check environment variables.');
+      console.log("[v0] Supabase not configured, running in local mode");
+      setSupabase(null);
       setIsInitializing(false);
       return;
     }
     setSupabase(client);
+    console.log("[v0] Supabase client initialized");
   }, []);
 
   // Initialize user session once supabase is ready
   useEffect(() => {
-    if (!supabase) return;
+    if (supabase === undefined) return; // Still initializing
 
     const initializeUser = async () => {
       try {
+        console.log("[v0] Checking authentication...");
         const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+        console.log("[v0] Auth check result:", { authenticated: !!authUser, error: authError?.message });
 
         if (authError || !authUser) {
-          router.push('/auth/login');
+          console.log("[v0] No user authenticated - running in demo mode");
+          setUser(null);
+          setIsInitializing(false);
           return;
         }
 
         setUser(authUser);
+        console.log("[v0] User authenticated:", authUser.id);
 
         // Load receipts from Supabase
         const { data, error: dbError } = await supabase
           .from('receipts')
+          .select('*')
+          .eq('user_id', authUser.id)
+          .order('uploaded_at', { ascending: false });
+
+        if (dbError) {
+          console.error("[v0] Database error:", dbError.message);
+          setError('Failed to load receipts');
+        } else {
+          console.log("[v0] Loaded receipts:", data?.length || 0);
+          setRecents(data || []);
+        }
+
+        setIsInitializing(false);
+      } catch (err) {
+        console.error("[v0] Initialization error:", err);
+        setIsInitializing(false);
+      }
+    };
+
+    if (supabase) {
+      initializeUser();
+    } else {
+      // No Supabase, run in demo mode
+      setIsInitializing(false);
+    }
+  }, [supabase]);
           .select('*')
           .eq('user_id', authUser.id)
           .order('uploaded_at', { ascending: false });
@@ -135,67 +168,97 @@ export default function Home() {
   };
 
   const saveReceipt = async (data) => {
-    if (!user || !supabase) return;
-
-    // Duplicate Detection
-    const isDuplicate = recents.some(r =>
-      r.merchant === data.merchant &&
-      Math.abs(r.total - data.total) < 0.01
-    );
-
-    if (isDuplicate) {
-      if (!confirm('This looks like a duplicate receipt. Save anyway?')) {
-        return;
-      }
-    }
-
     try {
-      const { data: insertedData, error: insertError } = await supabase
-        .from('receipts')
-        .insert([{
-          user_id: user.id,
-          store_name: data.merchant,
-          total_amount: parseFloat(data.total),
-          items: data.items || [],
-          wallet_data: data.walletData || null
-        }])
-        .select();
-
-      if (insertError) throw insertError;
-
+      console.log("[v0] Saving receipt:", { merchant: data.merchant, total: data.total });
+      
+      // Add to local recents immediately for instant feedback
       const newReceipt = {
-        id: insertedData[0].id,
-        merchant: insertedData[0].store_name,
-        total: Number(insertedData[0].total_amount),
-        date: new Date(insertedData[0].uploaded_at).toLocaleDateString(),
-        items: insertedData[0].items || [],
-        category: data.category || 'General',
-        tax: data.tax || 0,
-        _dbId: insertedData[0].id
+        id: Date.now().toString(),
+        store_name: data.merchant,
+        merchant: data.merchant,
+        total_amount: parseFloat(data.total),
+        total: parseFloat(data.total),
+        date: data.date,
+        category: data.category,
+        items: data.items || [],
+        uploaded_at: new Date().toISOString()
       };
+
+      // If user is authenticated, save to database
+      if (user && supabase) {
+        const { error } = await supabase
+          .from('receipts')
+          .insert([{
+            user_id: user.id,
+            store_name: data.merchant,
+            total_amount: parseFloat(data.total),
+            items: data.items || [],
+            wallet_data: data.walletData || null
+          }]);
+
+        if (error) throw error;
+        console.log("[v0] Receipt saved to database");
+      } else {
+        console.log("[v0] No user authenticated - saving to local state only");
+      }
 
       setRecents([newReceipt, ...recents]);
       setReceiptData(null);
       setFile(null);
+
+      // Generate Google Wallet pass
+      try {
+        const walletResponse = await fetch('/api/create-wallet-pass', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            merchant: data.merchant,
+            date: data.date,
+            total: data.total,
+            items: data.items,
+            category: data.category
+          })
+        });
+
+        if (walletResponse.ok) {
+          const walletData = await walletResponse.json();
+          if (walletData.saveUrl) {
+            console.log("[v0] Google Wallet pass created");
+            // Optionally auto-redirect to save (uncomment to enable):
+            // window.open(walletData.saveUrl, '_blank');
+          }
+        } else {
+          console.warn("[v0] Wallet pass creation failed");
+        }
+      } catch (walletError) {
+        console.warn("[v0] Wallet pass error:", walletError.message);
+      }
+
     } catch (err) {
-      console.error('Save error:', err);
-      setError('Failed to save receipt.');
+      console.error("[v0] Save error:", err);
+      setError('Failed to save receipt: ' + err.message);
     }
   };
 
-  const deleteReceipt = async (id) => {
-    if (!user || !supabase) return;
+  const deleteReceipt = (id) => {
+    console.log("[v0] Deleting receipt:", id);
+    const newReceipts = recents.filter(r => r.id !== id);
+    setRecents(newReceipts);
 
-    try {
-      const { error: deleteError } = await supabase
+    // If user is authenticated, also delete from database
+    if (user && supabase) {
+      supabase
         .from('receipts')
         .delete()
         .eq('id', id)
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .catch(err => console.error("[v0] Database delete failed:", err));
+    }
+  };
 
       if (deleteError) throw deleteError;
 
-      setRecents(recents.filter(r => r.id !== id));
+      setRecents(newReceipts.filter(r => r.id !== id));
     } catch (err) {
       console.error('Delete error:', err);
       setError('Failed to delete receipt.');
@@ -203,7 +266,7 @@ export default function Home() {
   };
 
   const currentMonthTotal = recents.reduce((acc, curr) => {
-    const amount = typeof curr.total === 'number' ? curr.total : parseFloat(curr.total || 0);
+    const amount = typeof curr.total === 'number' ? curr.total : (typeof curr.total_amount === 'number' ? curr.total_amount : parseFloat(curr.total || curr.total_amount || 0));
     return acc + (isNaN(amount) ? 0 : amount);
   }, 0);
 
@@ -214,18 +277,6 @@ export default function Home() {
         <div style={{ textAlign: 'center', color: '#94a3b8' }}>
           <div className="spinner" style={{ margin: '0 auto 1rem' }}></div>
           <p>Loading Bill Buddy...</p>
-        </div>
-      </main>
-    );
-  }
-
-  // Error state (no user)
-  if (error && !user) {
-    return (
-      <main className="container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center', color: '#ef4444', maxWidth: '400px' }}>
-          <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>{error}</p>
-          <a href="/auth/login" style={{ color: '#6366f1', textDecoration: 'underline' }}>Go to Login</a>
         </div>
       </main>
     );
@@ -252,24 +303,26 @@ export default function Home() {
             <span style={{ fontSize: '0.9rem', color: '#94a3b8' }}>Month:</span>
             <span style={{ fontWeight: 'bold' }}>{'₹'}{currentMonthTotal.toFixed(2)}</span>
           </div>
-          <button
-            onClick={handleLogout}
-            style={{
-              background: 'rgba(239, 68, 68, 0.1)',
-              border: '1px solid rgba(239, 68, 68, 0.2)',
-              color: '#ef4444',
-              cursor: 'pointer',
-              padding: '0.5rem 1rem',
-              borderRadius: '0.5rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.9rem'
-            }}
-          >
-            <LogOut size={16} />
-            Logout
-          </button>
+          {user && (
+            <button
+              onClick={handleLogout}
+              style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.2)',
+                color: '#ef4444',
+                cursor: 'pointer',
+                padding: '0.5rem 1rem',
+                borderRadius: '0.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                fontSize: '0.9rem'
+              }}
+            >
+              <LogOut size={16} />
+              Logout
+            </button>
+          )}
         </div>
       </header>
 
