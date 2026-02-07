@@ -19,25 +19,17 @@ export default function Home() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [supabase, setSupabase] = useState(null);
 
-  console.log("[v0] Home component rendered with state:", { isInitializing, supabase: !!supabase, user: user?.id });
-
   // Initialize Supabase client
   useEffect(() => {
-    console.log("[v0] Supabase init effect starting");
     try {
       const client = createClient();
-      console.log("[v0] createClient returned:", !!client);
-      
       if (!client) {
-        console.log("[v0] Supabase not configured, running in local mode");
         setSupabase(null);
         setIsInitializing(false);
         return;
       }
       setSupabase(client);
-      console.log("[v0] Supabase client initialized successfully");
     } catch (err) {
-      console.error("[v0] Supabase init error:", err.message);
       setSupabase(null);
       setIsInitializing(false);
     }
@@ -45,39 +37,25 @@ export default function Home() {
 
   // Initialize user session once supabase is ready
   useEffect(() => {
-    console.log("[v0] User init effect - supabase state:", !!supabase, "isInitializing:", isInitializing);
-    
-    if (supabase === undefined) {
-      console.log("[v0] Supabase still undefined, waiting...");
-      return;
-    }
+    if (supabase === undefined) return;
 
     const initializeUser = async () => {
       try {
-        console.log("[v0] Starting user initialization");
-        
         if (!supabase) {
-          console.log("[v0] No Supabase available, skipping auth check");
           setIsInitializing(false);
           return;
         }
 
-        console.log("[v0] Checking authentication with Supabase...");
         const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-        console.log("[v0] Auth result:", { authenticated: !!authUser, errorMsg: authError?.message });
 
         if (authError || !authUser) {
-          console.log("[v0] No user authenticated - running in demo mode");
           setUser(null);
           setIsInitializing(false);
           return;
         }
 
         setUser(authUser);
-        console.log("[v0] User authenticated:", authUser.id);
 
-        // Load receipts from Supabase
-        console.log("[v0] Loading receipts from database...");
         const { data, error: dbError } = await supabase
           .from('receipts')
           .select('*')
@@ -85,32 +63,39 @@ export default function Home() {
           .order('uploaded_at', { ascending: false });
 
         if (dbError) {
-          console.error("[v0] Database error:", dbError.message);
           setError('Failed to load receipts');
         } else {
-          console.log("[v0] Receipts loaded:", data?.length || 0);
           setRecents(data || []);
         }
 
         setIsInitializing(false);
-        console.log("[v0] User initialization complete");
       } catch (err) {
-        console.error("[v0] Initialization error:", err);
         setIsInitializing(false);
       }
     };
 
     if (supabase) {
-      console.log("[v0] Calling initializeUser");
       initializeUser();
     } else {
-      console.log("[v0] No supabase, setting isInitializing to false");
       setIsInitializing(false);
     }
   }, [supabase]);
 
   const handleFileSelect = (selectedFile) => {
-    console.log("[v0] File selected:", selectedFile?.name);
+    // Handle manual entry mode
+    if (selectedFile === 'manual') {
+      setFile(null);
+      setReceiptData({
+        merchant: '',
+        date: new Date().toISOString().split('T')[0],
+        total: 0,
+        tax: 0,
+        category: 'General',
+        items: [{ name: 'Item 1', price: 0 }]
+      });
+      return;
+    }
+    
     setFile(selectedFile);
     setReceiptData(null);
     setError(null);
@@ -131,13 +116,11 @@ export default function Home() {
 
     setLoading(true);
     setError(null);
-    console.log("[v0] Starting receipt processing...");
 
     try {
       const formData = new FormData();
       formData.append('file', file);
 
-      console.log("[v0] Sending to /api/process-receipt");
       const response = await fetch('/api/process-receipt', {
         method: 'POST',
         body: formData
@@ -149,10 +132,8 @@ export default function Home() {
       }
 
       const data = await response.json();
-      console.log("[v0] Receipt processed successfully:", data);
       setReceiptData(data);
     } catch (err) {
-      console.error("[v0] Processing error:", err);
       setError('Failed to process receipt: ' + err.message);
     } finally {
       setLoading(false);
@@ -161,15 +142,20 @@ export default function Home() {
 
   const saveReceipt = async (data) => {
     try {
-      console.log("[v0] Saving receipt:", { merchant: data.merchant, total: data.total });
+      const totalVal = parseFloat(data.total) || 0;
+      const merchantVal = data.merchant?.trim() || 'Unknown';
+      if (!merchantVal || merchantVal === 'Unknown') {
+        setError('Please enter a merchant name');
+        return;
+      }
       
       // Add to local recents immediately for instant feedback
       const newReceipt = {
         id: Date.now().toString(),
-        store_name: data.merchant,
-        merchant: data.merchant,
-        total_amount: parseFloat(data.total),
-        total: parseFloat(data.total),
+        store_name: merchantVal,
+        merchant: merchantVal,
+        total_amount: totalVal,
+        total: totalVal,
         date: data.date,
         category: data.category,
         items: data.items || [],
@@ -189,9 +175,6 @@ export default function Home() {
           }]);
 
         if (error) throw error;
-        console.log("[v0] Receipt saved to database");
-      } else {
-        console.log("[v0] No user authenticated - saving to local state only");
       }
 
       setRecents([newReceipt, ...recents]);
@@ -215,23 +198,23 @@ export default function Home() {
         if (walletResponse.ok) {
           const walletData = await walletResponse.json();
           if (walletData.saveUrl) {
-            console.log("[v0] Google Wallet pass created");
+            // Pass created successfully
           }
         } else {
-          console.warn("[v0] Wallet pass creation failed");
+          // Wallet pass failed silently
         }
       } catch (walletError) {
-        console.warn("[v0] Wallet pass error:", walletError.message);
+        // Wallet pass error - non-blocking
       }
 
     } catch (err) {
-      console.error("[v0] Save error:", err);
+      // Save failed
       setError('Failed to save receipt: ' + err.message);
     }
   };
 
   const deleteReceipt = (id) => {
-    console.log("[v0] Deleting receipt:", id);
+    
     const newReceipts = recents.filter(r => r.id !== id);
     setRecents(newReceipts);
 
@@ -242,7 +225,7 @@ export default function Home() {
         .delete()
         .eq('id', id)
         .eq('user_id', user.id)
-        .catch(err => console.error("[v0] Database delete failed:", err));
+        .catch(() => {});
     }
   };
 
@@ -253,7 +236,6 @@ export default function Home() {
 
   // Loading state
   if (isInitializing) {
-    console.log("[v0] Rendering loading state");
     return (
       <main className="container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center', color: '#94a3b8' }}>
@@ -264,8 +246,6 @@ export default function Home() {
     );
   }
 
-  console.log("[v0] Rendering main page - file:", !!file, "receiptData:", !!receiptData, "recents:", recents.length);
-  
   return (
     <main className="container">
       <header style={{
@@ -310,7 +290,7 @@ export default function Home() {
         </div>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginTop: '2rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem', marginTop: '2rem' }}>
         {/* Left Column - Upload & Processing */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* Upload Box Card */}
@@ -320,10 +300,10 @@ export default function Home() {
 
           {/* Analyze with AI Box */}
           {file && !receiptData && (
-            <div 
-              className="glass-panel" 
-              style={{ 
-                padding: '2rem', 
+            <div
+              className="glass-panel"
+              style={{
+                padding: '2rem',
                 textAlign: 'center',
                 cursor: loading ? 'not-allowed' : 'pointer',
                 opacity: loading ? 0.7 : 1,
@@ -342,18 +322,18 @@ export default function Home() {
               }}
             >
               {/* Animated background */}
-              <div style={{ 
-                position: 'absolute', 
-                inset: 0, 
+              <div style={{
+                position: 'absolute',
+                inset: 0,
                 background: 'radial-gradient(circle at 20% 50%, rgba(139, 92, 246, 0.1), transparent 50%)',
                 pointerEvents: 'none',
                 animation: 'pulse 4s ease-in-out infinite'
               }}></div>
-              
+
               <div style={{ position: 'relative', zIndex: 1 }}>
-                <div style={{ 
-                  width: '60px', 
-                  height: '60px', 
+                <div style={{
+                  width: '60px',
+                  height: '60px',
                   margin: '0 auto 1rem',
                   background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
                   borderRadius: '50%',
@@ -363,14 +343,14 @@ export default function Home() {
                 }}>
                   <Camera size={32} color="white" />
                 </div>
-                
+
                 <h3 style={{ fontSize: '1.3rem', marginBottom: '0.5rem', fontWeight: '700' }}>
                   Analyze with AI
                 </h3>
                 <p style={{ color: '#94a3b8', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
                   Click to process your receipt using Gemini AI
                 </p>
-                
+
                 <button
                   onClick={processReceipt}
                   disabled={loading}
@@ -417,14 +397,14 @@ export default function Home() {
 
           {/* Error Message */}
           {error && (
-            <div style={{ 
-              marginTop: '1rem', 
-              padding: '1rem', 
-              background: 'rgba(239, 68, 68, 0.1)', 
+            <div style={{
+              marginTop: '1rem',
+              padding: '1rem',
+              background: 'rgba(239, 68, 68, 0.1)',
               border: '1px solid rgba(239, 68, 68, 0.3)',
-              borderRadius: '8px', 
-              color: '#ef4444', 
-              fontSize: '0.9rem' 
+              borderRadius: '8px',
+              color: '#ef4444',
+              fontSize: '0.9rem'
             }}>
               ⚠️ {error}
             </div>
@@ -436,12 +416,12 @@ export default function Home() {
               <ReceiptCard data={receiptData} onChange={setReceiptData} />
               <button
                 onClick={() => saveReceipt(receiptData)}
-                style={{ 
-                  width: '100%', 
-                  marginTop: '1rem', 
-                  padding: '1rem', 
+                style={{
+                  width: '100%',
+                  marginTop: '1rem',
+                  padding: '1rem',
                   background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
-                  color: '#fff', 
+                  color: '#fff',
                   border: 'none',
                   borderRadius: '12px',
                   fontWeight: '700',
@@ -470,7 +450,7 @@ export default function Home() {
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '400px', overflowY: 'auto', paddingRight: '0.5rem' }}>
               {recents.length === 0 ? (
-                <div style={{ 
+                <div style={{
                   padding: '2rem',
                   textAlign: 'center',
                   color: '#64748b',
@@ -484,13 +464,13 @@ export default function Home() {
                 </div>
               ) : (
                 recents.map(r => (
-                  <div 
-                    key={r.id} 
-                    className="glass-panel" 
-                    style={{ 
-                      padding: '1rem', 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
+                  <div
+                    key={r.id}
+                    className="glass-panel"
+                    style={{
+                      padding: '1rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
                       alignItems: 'center',
                       transition: 'all 0.2s ease',
                       cursor: 'pointer'
@@ -512,7 +492,7 @@ export default function Home() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                       <div style={{ fontWeight: '700', color: 'var(--secondary)', fontSize: '1.1rem', minWidth: '80px', textAlign: 'right' }}>
-                        ₹{Number(r.total).toFixed(2)}
+                        ₹{(Number(r.total || r.total_amount) || 0).toFixed(2)}
                       </div>
                       <button
                         onClick={(e) => {
@@ -551,5 +531,4 @@ export default function Home() {
       </div>
     </main>
   );
-}
 }
