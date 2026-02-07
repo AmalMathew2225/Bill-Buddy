@@ -8,7 +8,7 @@ export default function InsightsChart({ receipts }) {
     if (!receipts || receipts.length === 0) return null;
 
     // Aggregate data by category
-    const dataMap = receipts.reduce((acc, curr) => {
+    const dataMap = (receipts || []).reduce((acc, curr) => {
         const category = curr.category || 'Uncategorized';
         const amount = typeof curr.total === 'number' ? curr.total : parseFloat(curr.total || 0);
 
