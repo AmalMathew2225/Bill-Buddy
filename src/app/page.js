@@ -108,37 +108,13 @@ export default function Home() {
       setIsInitializing(false);
     }
   }, [supabase]);
-          .select('*')
-          .eq('user_id', authUser.id)
-          .order('uploaded_at', { ascending: false });
 
-        if (dbError) {
-          console.error('Error loading receipts:', dbError);
-        } else {
-          // Map DB fields to the format our components expect
-          const mapped = (data || []).map(r => ({
-            id: r.id,
-            merchant: r.store_name,
-            total: Number(r.total_amount),
-            date: new Date(r.uploaded_at).toLocaleDateString(),
-            items: r.items || [],
-            category: 'General',
-            tax: 0,
-            walletData: r.wallet_data,
-            _dbId: r.id
-          }));
-          setRecents(mapped);
-        }
-      } catch (err) {
-        console.error('Init error:', err);
-        setError('Failed to initialize. Please refresh.');
-      } finally {
-        setIsInitializing(false);
-      }
-    };
-
-    initializeUser();
-  }, [supabase, router]);
+  const handleFileSelect = (selectedFile) => {
+    console.log("[v0] File selected:", selectedFile?.name);
+    setFile(selectedFile);
+    setReceiptData(null);
+    setError(null);
+  };
 
   const handleLogout = async () => {
     if (supabase) {
@@ -147,48 +123,37 @@ export default function Home() {
     router.push('/auth/login');
   };
 
-  const handleFileSelect = (selectedFile) => {
-    setFile(selectedFile);
-    setReceiptData(null);
-    setError(null);
-
-    if (selectedFile === 'manual') {
-      setReceiptData({
-        merchant: '',
-        date: new Date().toISOString().split('T')[0],
-        total: 0,
-        tax: 0,
-        category: 'General',
-        items: [{ name: 'Item 1', price: 0 }]
-      });
-      setFile(null);
-    }
-  };
-
   const processReceipt = async () => {
-    if (!file) return;
+    if (!file) {
+      setError('Please select a file first');
+      return;
+    }
+
     setLoading(true);
     setError(null);
+    console.log("[v0] Starting receipt processing...");
 
     try {
       const formData = new FormData();
       formData.append('file', file);
 
+      console.log("[v0] Sending to /api/process-receipt");
       const response = await fetch('/api/process-receipt', {
         method: 'POST',
-        body: formData,
+        body: formData
       });
 
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `Server error: ${response.status}`);
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'API Error');
       }
 
       const data = await response.json();
-      data.id = Date.now().toString();
+      console.log("[v0] Receipt processed successfully:", data);
       setReceiptData(data);
     } catch (err) {
-      setError(err.message);
+      console.error("[v0] Processing error:", err);
+      setError('Failed to process receipt: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -251,8 +216,6 @@ export default function Home() {
           const walletData = await walletResponse.json();
           if (walletData.saveUrl) {
             console.log("[v0] Google Wallet pass created");
-            // Optionally auto-redirect to save (uncomment to enable):
-            // window.open(walletData.saveUrl, '_blank');
           }
         } else {
           console.warn("[v0] Wallet pass creation failed");
@@ -280,15 +243,6 @@ export default function Home() {
         .eq('id', id)
         .eq('user_id', user.id)
         .catch(err => console.error("[v0] Database delete failed:", err));
-    }
-  };
-
-      if (deleteError) throw deleteError;
-
-      setRecents(newReceipts.filter(r => r.id !== id));
-    } catch (err) {
-      console.error('Delete error:', err);
-      setError('Failed to delete receipt.');
     }
   };
 
