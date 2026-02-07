@@ -21,7 +21,7 @@ export default function RootLayout({ children }) {
           html, body {
             background-color: #0f172a;
             color: #f8fafc;
-            font-family: ${inter.style.fontFamily}, system-ui, -apple-system, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
             height: 100%;
             max-width: 100vw;
             overflow-x: hidden;
