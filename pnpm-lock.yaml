@@ -38,10 +38,6 @@ importers:
       recharts:
         specifier: ^3.7.0
         version: 3.7.0(@types/react@19.2.13)(react-dom@18.3.1(react@18.3.1))(react-is@19.2.4)(react@18.3.1)(redux@5.0.1)
-    devDependencies:
-      '@types/react':
-        specifier: 19.2.13
-        version: 19.2.13
 
 packages:
 
@@ -616,6 +612,7 @@ snapshots:
   '@types/react@19.2.13':
     dependencies:
       csstype: 3.2.3
+    optional: true
 
   '@types/use-sync-external-store@0.0.6': {}
 
@@ -637,7 +634,8 @@ snapshots:
 
   cookie@1.1.1: {}
 
-  csstype@3.2.3: {}
+  csstype@3.2.3:
+    optional: true
 
   d3-array@3.2.4:
     dependencies:
