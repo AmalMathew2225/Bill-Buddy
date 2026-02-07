@@ -273,85 +273,242 @@ export default function Home() {
         </div>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-        <div>
-          <UploadZone onFileSelect={handleFileSelect} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginTop: '2rem' }}>
+        {/* Left Column - Upload & Processing */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Upload Box Card */}
+          <div style={{ padding: '0' }}>
+            <UploadZone onFileSelect={handleFileSelect} />
+          </div>
 
+          {/* Analyze with AI Box */}
           {file && !receiptData && (
-            <button
-              onClick={processReceipt}
-              disabled={loading}
-              className="glass-button"
-              style={{ width: '100%', marginTop: '1rem', padding: '1rem', justifyContent: 'center' }}
+            <div 
+              className="glass-panel" 
+              style={{ 
+                padding: '2rem', 
+                textAlign: 'center',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.7 : 1,
+                border: '2px solid rgba(139, 92, 246, 0.3)',
+                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.05) 0%, rgba(236, 72, 153, 0.05) 100%)',
+                transition: 'all 0.3s ease',
+                transform: 'hover:scale(1.02)',
+                position: 'relative',
+                overflow: 'hidden'
+              }}
+              onMouseEnter={(e) => {
+                if (!loading) e.currentTarget.style.borderColor = 'rgba(139, 92, 246, 0.6)';
+              }}
+              onMouseLeave={(e) => {
+                if (!loading) e.currentTarget.style.borderColor = 'rgba(139, 92, 246, 0.3)';
+              }}
             >
-              {loading ? (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <div className="spinner" style={{ width: '16px', height: '16px' }}></div>
-                  Processing with AI...
-                </span>
-              ) : (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Camera size={18} /> Analyze Receipt
-                </span>
-              )}
-            </button>
-          )}
-
-          {error && (
-            <div style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', color: '#ef4444', fontSize: '0.9rem' }}>
-              {error}
+              {/* Animated background */}
+              <div style={{ 
+                position: 'absolute', 
+                inset: 0, 
+                background: 'radial-gradient(circle at 20% 50%, rgba(139, 92, 246, 0.1), transparent 50%)',
+                pointerEvents: 'none',
+                animation: 'pulse 4s ease-in-out infinite'
+              }}></div>
+              
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <div style={{ 
+                  width: '60px', 
+                  height: '60px', 
+                  margin: '0 auto 1rem',
+                  background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Camera size={32} color="white" />
+                </div>
+                
+                <h3 style={{ fontSize: '1.3rem', marginBottom: '0.5rem', fontWeight: '700' }}>
+                  Analyze with AI
+                </h3>
+                <p style={{ color: '#94a3b8', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
+                  Click to process your receipt using Gemini AI
+                </p>
+                
+                <button
+                  onClick={processReceipt}
+                  disabled={loading}
+                  style={{
+                    width: '100%',
+                    padding: '1rem 2rem',
+                    fontSize: '1rem',
+                    fontWeight: '700',
+                    background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '12px',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    transition: 'all 0.3s ease',
+                    opacity: loading ? 0.7 : 1,
+                    transform: loading ? 'scale(0.98)' : 'scale(1)'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) e.currentTarget.style.transform = 'scale(1.02)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading) e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                >
+                  {loading ? (
+                    <>
+                      <div className="spinner" style={{ width: '20px', height: '20px' }}></div>
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <Camera size={20} />
+                      Start Analysis
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           )}
 
+          {/* Error Message */}
+          {error && (
+            <div style={{ 
+              marginTop: '1rem', 
+              padding: '1rem', 
+              background: 'rgba(239, 68, 68, 0.1)', 
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '8px', 
+              color: '#ef4444', 
+              fontSize: '0.9rem' 
+            }}>
+              ⚠️ {error}
+            </div>
+          )}
+
+          {/* Receipt Card */}
           {receiptData && (
-            <div style={{ marginTop: '1rem' }}>
+            <div>
               <ReceiptCard data={receiptData} onChange={setReceiptData} />
               <button
                 onClick={() => saveReceipt(receiptData)}
-                className="glass-button"
-                style={{ width: '100%', marginTop: '1rem', padding: '1rem', justifyContent: 'center', background: 'var(--primary)', color: '#fff', border: 'none' }}
+                style={{ 
+                  width: '100%', 
+                  marginTop: '1rem', 
+                  padding: '1rem', 
+                  background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
+                  color: '#fff', 
+                  border: 'none',
+                  borderRadius: '12px',
+                  fontWeight: '700',
+                  fontSize: '1rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem'
+                }}
               >
-                <CreditCard size={18} style={{ marginRight: '0.5rem' }} />
+                <CreditCard size={18} />
                 Save Receipt
               </button>
             </div>
           )}
         </div>
 
-        <div>
+        {/* Right Column - Insights & Recents */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
           <InsightsChart receipts={recents} />
 
-          <h2 style={{ margin: '2rem 0 1rem', color: '#94a3b8', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Recent</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {recents.map(r => (
-              <div key={r.id} className="glass-panel" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{r.merchant}</div>
-                  <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{r.date}</div>
+          <div>
+            <h2 style={{ margin: '0 0 1rem', color: '#94a3b8', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              Recent Receipts
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '400px', overflowY: 'auto', paddingRight: '0.5rem' }}>
+              {recents.length === 0 ? (
+                <div style={{ 
+                  padding: '2rem',
+                  textAlign: 'center',
+                  color: '#64748b',
+                  fontStyle: 'italic',
+                  fontSize: '0.9rem',
+                  background: 'rgba(30, 41, 59, 0.3)',
+                  borderRadius: '8px',
+                  border: '1px dashed rgba(148, 163, 184, 0.2)'
+                }}>
+                  No receipts yet. Upload one to get started.
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <div style={{ fontWeight: 700, color: 'var(--secondary)' }}>{'₹'}{Number(r.total).toFixed(2)}</div>
-                  <button
-                    onClick={() => deleteReceipt(r.id)}
-                    style={{
-                      background: 'rgba(239, 68, 68, 0.1)',
-                      border: '1px solid rgba(239, 68, 68, 0.2)',
-                      color: '#ef4444',
-                      cursor: 'pointer',
-                      padding: '8px',
-                      borderRadius: '8px',
-                      display: 'flex',
+              ) : (
+                recents.map(r => (
+                  <div 
+                    key={r.id} 
+                    className="glass-panel" 
+                    style={{ 
+                      padding: '1rem', 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
                       alignItems: 'center',
-                      justifyContent: 'center'
+                      transition: 'all 0.2s ease',
+                      cursor: 'pointer'
                     }}
-                    className="delete-btn"
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(30, 41, 59, 0.8)';
+                      e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(30, 41, 59, 0.5)';
+                      e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.1)';
+                    }}
                   >
-                    <Trash2 size={20} />
-                  </button>
-                </div>
-              </div>
-            ))}
-            {recents.length === 0 && <p style={{ color: '#64748b', fontStyle: 'italic', fontSize: '0.9rem' }}>No receipts yet. Upload one to get started.</p>}
+                    <div>
+                      <div style={{ fontWeight: '600', fontSize: '0.95rem' }}>{r.merchant}</div>
+                      <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                        {r.date}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <div style={{ fontWeight: '700', color: 'var(--secondary)', fontSize: '1.1rem', minWidth: '80px', textAlign: 'right' }}>
+                        ₹{Number(r.total).toFixed(2)}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteReceipt(r.id);
+                        }}
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.1)',
+                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                          color: '#ef4444',
+                          cursor: 'pointer',
+                          padding: '8px',
+                          borderRadius: '8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s ease'
+                        }}
+                        className="delete-btn"
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                        }}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       </div>
