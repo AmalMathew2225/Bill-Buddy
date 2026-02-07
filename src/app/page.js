@@ -1,31 +1,67 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import UploadZone from '@/components/UploadZone';
 import ReceiptCard from '@/components/ReceiptCard';
 import InsightsChart from '@/components/InsightsChart';
-import { Camera, CreditCard, TrendingUp, Trash2 } from 'lucide-react';
+import { Camera, CreditCard, TrendingUp, Trash2, LogOut } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
 export default function Home() {
+  const router = useRouter();
+  const supabase = createClient();
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [receiptData, setReceiptData] = useState(null);
   const [error, setError] = useState(null);
   const [recents, setRecents] = useState([]);
+  const [user, setUser] = useState(null);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem('receipts');
-    if (stored) {
-      setRecents(JSON.parse(stored));
-    }
-  }, []);
+    const initializeUser = async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error || !user) {
+        router.push('/auth/login');
+        return;
+      }
+      setUser(user);
+      await loadReceipts(user.id);
+      setIsInitializing(false);
+    };
 
-  const saveReceipt = (data) => {
+    initializeUser();
+  }, [router, supabase]);
+
+  const loadReceipts = async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('receipts')
+        .select('*')
+        .eq('user_id', userId)
+        .order('uploaded_at', { ascending: false });
+      
+      if (error) throw error;
+      setRecents(data || []);
+    } catch (err) {
+      console.error('Error loading receipts:', err);
+      setError('Failed to load receipts');
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/auth/login');
+  };
+
+  const saveReceipt = async (data) => {
+    if (!user) return;
+
     // Duplicate Detection Logic
     const isDuplicate = recents.some(r =>
-      r.date === data.date &&
-      Math.abs(r.total - data.total) < 0.01 &&
-      r.merchant.toLowerCase() === data.merchant.toLowerCase()
+      r.store_name === data.merchant &&
+      Math.abs(parseFloat(r.total_amount) - parseFloat(data.total)) < 0.01
     );
 
     if (isDuplicate) {
@@ -34,28 +70,64 @@ export default function Home() {
       }
     }
 
-    const newReceipts = [data, ...recents];
-    setRecents(newReceipts);
-    localStorage.setItem('receipts', JSON.stringify(newReceipts));
-    setReceiptData(null);
-    setFile(null);
+    try {
+      const { data: insertedData, error } = await supabase
+        .from('receipts')
+        .insert([{
+          user_id: user.id,
+          store_name: data.merchant,
+          total_amount: parseFloat(data.total),
+          items: data.items || [],
+          wallet_data: data.walletData || null
+        }])
+        .select();
+
+      if (error) throw error;
+
+      setRecents([insertedData[0], ...recents]);
+      setReceiptData(null);
+      setFile(null);
+    } catch (err) {
+      console.error('Error saving receipt:', err);
+      setError('Failed to save receipt');
+    }
   };
 
-  const deleteReceipt = (id) => {
-    // Determine if we should use confirm or just delete
-    // For now, removing confirm as it seems to be blocking for some users
-    // if (confirm('Are you sure you want to delete this receipt?')) {
-    const newReceipts = recents.filter(r => r.id !== id);
-    setRecents(newReceipts);
-    localStorage.setItem('receipts', JSON.stringify(newReceipts));
-    // }
+  const deleteReceipt = async (id) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('receipts')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      const newReceipts = recents.filter(r => r.id !== id);
+      setRecents(newReceipts);
+    } catch (err) {
+      console.error('Error deleting receipt:', err);
+      setError('Failed to delete receipt');
+    }
   };
 
   const currentMonthTotal = recents.reduce((acc, curr) => {
     // robust parsing
-    const amount = typeof curr.total === 'number' ? curr.total : parseFloat(curr.total || 0);
+    const amount = typeof curr.total_amount === 'number' ? curr.total_amount : parseFloat(curr.total_amount || 0);
     return acc + (isNaN(amount) ? 0 : amount);
   }, 0);
+
+  if (isInitializing) {
+    return (
+      <main className="container">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+          <div className="spinner"></div>
+        </div>
+      </main>
+    );
+  }
 
   const handleFileSelect = async (selectedFile) => {
     setFile(selectedFile);
@@ -118,12 +190,30 @@ export default function Home() {
           <span className="title-gradient">BILL BUDDY</span>
           <span style={{ fontSize: '0.8rem', background: 'var(--card-border)', padding: '2px 8px', borderRadius: '12px', color: '#94a3b8' }}>AI AGENT</span>
         </h1>
-        <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           <div className="glass-panel" style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', borderRadius: '0.5rem' }}>
             <TrendingUp size={16} color="var(--secondary)" />
             <span style={{ fontSize: '0.9rem', color: '#94a3b8' }}>Month:</span>
             <span style={{ fontWeight: 'bold' }}>₹{currentMonthTotal.toFixed(2)}</span>
           </div>
+          <button
+            onClick={handleLogout}
+            style={{
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              color: '#ef4444',
+              cursor: 'pointer',
+              padding: '0.5rem 1rem',
+              borderRadius: '0.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontSize: '0.9rem'
+            }}
+          >
+            <LogOut size={16} />
+            Logout
+          </button>
         </div>
       </header>
 
@@ -139,11 +229,11 @@ export default function Home() {
             {recents.map(r => (
               <div key={r.id} className="glass-panel" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontWeight: 600 }}>{r.merchant}</div>
-                  <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{r.date} • {r.category}</div>
+                  <div style={{ fontWeight: 600 }}>{r.store_name}</div>
+                  <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{new Date(r.uploaded_at).toLocaleDateString()}</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <div style={{ fontWeight: 700, color: 'var(--secondary)' }}>₹{Number(r.total).toFixed(2)}</div>
+                  <div style={{ fontWeight: 700, color: 'var(--secondary)' }}>₹{Number(r.total_amount).toFixed(2)}</div>
                   <button
                     onClick={() => {
                       console.log('Delete clicked for id:', r.id);
