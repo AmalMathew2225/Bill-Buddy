@@ -1,4 +1,9 @@
 const nextConfig = {
+  reactStrictMode: true,
+  // Force clean rebuild - v2
+  generateBuildId: async () => {
+    return 'bill-buddy-build-' + Date.now()
+  },
   async headers() {
     return [
       {

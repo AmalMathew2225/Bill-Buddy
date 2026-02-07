@@ -1,109 +1,250 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import UploadZone from '@/components/UploadZone';
 import ReceiptCard from '@/components/ReceiptCard';
 import InsightsChart from '@/components/InsightsChart';
-import { Camera, CreditCard, TrendingUp, Trash2 } from 'lucide-react';
+import { Camera, CreditCard, TrendingUp, Trash2, LogOut } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
 export default function Home() {
+  const router = useRouter();
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [receiptData, setReceiptData] = useState(null);
   const [error, setError] = useState(null);
   const [recents, setRecents] = useState([]);
+  const [user, setUser] = useState(null);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [supabase, setSupabase] = useState(null);
 
+  // Initialize Supabase client
   useEffect(() => {
-    const stored = localStorage.getItem('receipts');
-    if (stored) {
-      setRecents(JSON.parse(stored));
+    try {
+      const client = createClient();
+      if (!client) {
+        setSupabase(null);
+        setIsInitializing(false);
+        return;
+      }
+      setSupabase(client);
+    } catch (err) {
+      setSupabase(null);
+      setIsInitializing(false);
     }
   }, []);
 
-  const saveReceipt = (data) => {
-    // Duplicate Detection Logic
-    const isDuplicate = recents.some(r =>
-      r.date === data.date &&
-      Math.abs(r.total - data.total) < 0.01 &&
-      r.merchant.toLowerCase() === data.merchant.toLowerCase()
-    );
+  // Initialize user session once supabase is ready
+  useEffect(() => {
+    if (supabase === undefined) return;
 
-    if (isDuplicate) {
-      if (!confirm('This looks like a duplicate receipt. Do you want to save it anyway?')) {
-        return;
+    const initializeUser = async () => {
+      try {
+        if (!supabase) {
+          setIsInitializing(false);
+          return;
+        }
+
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+
+        if (authError || !authUser) {
+          setUser(null);
+          setIsInitializing(false);
+          return;
+        }
+
+        setUser(authUser);
+
+        const { data, error: dbError } = await supabase
+          .from('receipts')
+          .select('*')
+          .eq('user_id', authUser.id)
+          .order('uploaded_at', { ascending: false });
+
+        if (dbError) {
+          setError('Failed to load receipts');
+        } else {
+          setRecents(data || []);
+        }
+
+        setIsInitializing(false);
+      } catch (err) {
+        setIsInitializing(false);
       }
+    };
+
+    if (supabase) {
+      initializeUser();
+    } else {
+      setIsInitializing(false);
     }
+  }, [supabase]);
 
-    const newReceipts = [data, ...recents];
-    setRecents(newReceipts);
-    localStorage.setItem('receipts', JSON.stringify(newReceipts));
-    setReceiptData(null);
-    setFile(null);
-  };
-
-  const deleteReceipt = (id) => {
-    // Determine if we should use confirm or just delete
-    // For now, removing confirm as it seems to be blocking for some users
-    // if (confirm('Are you sure you want to delete this receipt?')) {
-    const newReceipts = recents.filter(r => r.id !== id);
-    setRecents(newReceipts);
-    localStorage.setItem('receipts', JSON.stringify(newReceipts));
-    // }
-  };
-
-  const currentMonthTotal = recents.reduce((acc, curr) => {
-    // robust parsing
-    const amount = typeof curr.total === 'number' ? curr.total : parseFloat(curr.total || 0);
-    return acc + (isNaN(amount) ? 0 : amount);
-  }, 0);
-
-  const handleFileSelect = async (selectedFile) => {
-    setFile(selectedFile);
-    setReceiptData(null);
-    setError(null);
-
+  const handleFileSelect = (selectedFile) => {
+    // Handle manual entry mode
     if (selectedFile === 'manual') {
-      const today = new Date().toISOString().split('T')[0];
+      setFile(null);
       setReceiptData({
         merchant: '',
-        date: today,
+        date: new Date().toISOString().split('T')[0],
         total: 0,
         tax: 0,
-        category: 'Uncategorized',
-        items: []
+        category: 'General',
+        items: [{ name: 'Item 1', price: 0 }]
       });
       return;
     }
+    
+    setFile(selectedFile);
+    setReceiptData(null);
+    setError(null);
+  };
 
-    if (selectedFile) {
-      setLoading(true);
+  const handleLogout = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    router.push('/auth/login');
+  };
+
+  const processReceipt = async () => {
+    if (!file) {
+      setError('Please select a file first');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
       const formData = new FormData();
-      formData.append('file', selectedFile);
+      formData.append('file', file);
 
-      try {
-        const res = await fetch('/api/process-receipt', {
-          method: 'POST',
-          body: formData,
-        });
+      const response = await fetch('/api/process-receipt', {
+        method: 'POST',
+        body: formData
+      });
 
-        const contentType = res.headers.get("content-type");
-        if (contentType && contentType.indexOf("application/json") !== -1) {
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Failed to process receipt');
-          setReceiptData({ ...data, id: Date.now() });
-        } else {
-          const text = await res.text();
-          console.error("Non-JSON received:", text);
-          throw new Error(`Server error: ${res.status} ${res.statusText}`);
-        }
-      } catch (err) {
-        console.error(err);
-        setError(err.message);
-      } finally {
-        setLoading(false);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'API Error');
       }
+
+      const data = await response.json();
+      setReceiptData(data);
+    } catch (err) {
+      setError('Failed to process receipt: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
+
+  const saveReceipt = async (data) => {
+    try {
+      const totalVal = parseFloat(data.total) || 0;
+      const merchantVal = data.merchant?.trim() || 'Unknown';
+      if (!merchantVal || merchantVal === 'Unknown') {
+        setError('Please enter a merchant name');
+        return;
+      }
+      
+      // Add to local recents immediately for instant feedback
+      const newReceipt = {
+        id: Date.now().toString(),
+        store_name: merchantVal,
+        merchant: merchantVal,
+        total_amount: totalVal,
+        total: totalVal,
+        date: data.date,
+        category: data.category,
+        items: data.items || [],
+        uploaded_at: new Date().toISOString()
+      };
+
+      // If user is authenticated, save to database
+      if (user && supabase) {
+        const { error } = await supabase
+          .from('receipts')
+          .insert([{
+            user_id: user.id,
+            store_name: data.merchant,
+            total_amount: parseFloat(data.total),
+            items: data.items || [],
+            wallet_data: data.walletData || null
+          }]);
+
+        if (error) throw error;
+      }
+
+      setRecents([newReceipt, ...recents]);
+      setReceiptData(null);
+      setFile(null);
+
+      // Generate Google Wallet pass
+      try {
+        const walletResponse = await fetch('/api/create-wallet-pass', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            merchant: data.merchant,
+            date: data.date,
+            total: data.total,
+            items: data.items,
+            category: data.category
+          })
+        });
+
+        if (walletResponse.ok) {
+          const walletData = await walletResponse.json();
+          if (walletData.saveUrl) {
+            // Pass created successfully
+          }
+        } else {
+          // Wallet pass failed silently
+        }
+      } catch (walletError) {
+        // Wallet pass error - non-blocking
+      }
+
+    } catch (err) {
+      // Save failed
+      setError('Failed to save receipt: ' + err.message);
+    }
+  };
+
+  const deleteReceipt = (id) => {
+    
+    const newReceipts = recents.filter(r => r.id !== id);
+    setRecents(newReceipts);
+
+    // If user is authenticated, also delete from database
+    if (user && supabase) {
+      supabase
+        .from('receipts')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .catch(() => {});
+    }
+  };
+
+  const currentMonthTotal = recents.reduce((acc, curr) => {
+    const amount = typeof curr.total === 'number' ? curr.total : (typeof curr.total_amount === 'number' ? curr.total_amount : parseFloat(curr.total || curr.total_amount || 0));
+    return acc + (isNaN(amount) ? 0 : amount);
+  }, 0);
+
+  // Loading state
+  if (isInitializing) {
+    return (
+      <main className="container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', color: '#94a3b8' }}>
+          <div className="spinner" style={{ margin: '0 auto 1rem' }}></div>
+          <p>Loading Bill Buddy...</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="container">
@@ -112,99 +253,282 @@ export default function Home() {
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: '2rem 0',
-        marginBottom: '2rem'
+        marginBottom: '2rem',
+        flexWrap: 'wrap',
+        gap: '1rem'
       }}>
         <h1 style={{ fontSize: '2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span className="title-gradient">BILL BUDDY</span>
           <span style={{ fontSize: '0.8rem', background: 'var(--card-border)', padding: '2px 8px', borderRadius: '12px', color: '#94a3b8' }}>AI AGENT</span>
         </h1>
-        <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="glass-panel" style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', borderRadius: '0.5rem' }}>
             <TrendingUp size={16} color="var(--secondary)" />
             <span style={{ fontSize: '0.9rem', color: '#94a3b8' }}>Month:</span>
-            <span style={{ fontWeight: 'bold' }}>₹{currentMonthTotal.toFixed(2)}</span>
+            <span style={{ fontWeight: 'bold' }}>{'₹'}{currentMonthTotal.toFixed(2)}</span>
           </div>
+          {user && (
+            <button
+              onClick={handleLogout}
+              style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.2)',
+                color: '#ef4444',
+                cursor: 'pointer',
+                padding: '0.5rem 1rem',
+                borderRadius: '0.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                fontSize: '0.9rem'
+              }}
+            >
+              <LogOut size={16} />
+              Logout
+            </button>
+          )}
         </div>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 1fr) 2fr', gap: '2rem' }}>
-        <section>
-          <h2 style={{ marginBottom: '1rem', color: '#94a3b8', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Upload Receipt</h2>
-          <UploadZone onFileSelect={handleFileSelect} />
-
-          {recents.length > 0 && <InsightsChart receipts={recents} />}
-
-          <h2 style={{ margin: '2rem 0 1rem', color: '#94a3b8', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Recent</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {recents.map(r => (
-              <div key={r.id} className="glass-panel" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{r.merchant}</div>
-                  <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{r.date} • {r.category}</div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <div style={{ fontWeight: 700, color: 'var(--secondary)' }}>₹{Number(r.total).toFixed(2)}</div>
-                  <button
-                    onClick={() => {
-                      console.log('Delete clicked for id:', r.id);
-                      deleteReceipt(r.id);
-                    }}
-                    style={{
-                      background: 'rgba(239, 68, 68, 0.1)',
-                      border: '1px solid rgba(239, 68, 68, 0.2)',
-                      color: '#ef4444',
-                      cursor: 'pointer',
-                      padding: '8px',
-                      borderRadius: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'all 0.2s ease',
-                      position: 'relative',
-                      zIndex: 10
-                    }}
-                    title="Delete Receipt"
-                    className="delete-btn"
-                  >
-                    <Trash2 size={20} />
-                  </button>
-                </div>
-              </div>
-            ))}
-            {recents.length === 0 && <p style={{ color: '#64748b', fontStyle: 'italic', fontSize: '0.9rem' }}>No receipts yet.</p>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem', marginTop: '2rem' }}>
+        {/* Left Column - Upload & Processing */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Upload Box Card */}
+          <div style={{ padding: '0' }}>
+            <UploadZone onFileSelect={handleFileSelect} />
           </div>
-        </section>
 
-        <section>
-          {loading ? (
-            <div className="glass-panel" style={{ minHeight: '400px', padding: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', gap: '1rem' }}>
-              <div className="spinner"></div>
-              <p>Analyzing receipt with Gemini 2.0 Flash...</p>
-            </div>
-          ) : error ? (
-            <div className="glass-panel" style={{ minHeight: '400px', padding: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
-              Error: {error}
-            </div>
-          ) : receiptData ? (
-            <div className="glass-panel" style={{ padding: '2rem', animation: 'fadeIn 0.5s ease' }}>
-              <ReceiptCard data={receiptData} onChange={setReceiptData} />
-              <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
-                <button onClick={() => saveReceipt(receiptData)} className="glass-button" style={{ flex: 1 }}>Confirm & Save</button>
-                <button onClick={() => setReceiptData(null)} className="glass-button" style={{ flex: 1, background: 'rgba(255,255,255,0.1)' }}>Discard</button>
-              </div>
-            </div>
-          ) : (
-            <div className="glass-panel" style={{ minHeight: '400px', padding: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', textAlign: 'center' }}>
-              <div>
-                <CreditCard size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
-                <h3>Ready to Organize?</h3>
-                <p style={{ marginTop: '0.5rem', maxWidth: '300px' }}>Upload a receipt to extract data, track spending, and generate wallet passes.</p>
+          {/* Analyze with AI Box */}
+          {file && !receiptData && (
+            <div
+              className="glass-panel"
+              style={{
+                padding: '2rem',
+                textAlign: 'center',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.7 : 1,
+                border: '2px solid rgba(139, 92, 246, 0.3)',
+                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.05) 0%, rgba(236, 72, 153, 0.05) 100%)',
+                transition: 'all 0.3s ease',
+                transform: 'hover:scale(1.02)',
+                position: 'relative',
+                overflow: 'hidden'
+              }}
+              onMouseEnter={(e) => {
+                if (!loading) e.currentTarget.style.borderColor = 'rgba(139, 92, 246, 0.6)';
+              }}
+              onMouseLeave={(e) => {
+                if (!loading) e.currentTarget.style.borderColor = 'rgba(139, 92, 246, 0.3)';
+              }}
+            >
+              {/* Animated background */}
+              <div style={{
+                position: 'absolute',
+                inset: 0,
+                background: 'radial-gradient(circle at 20% 50%, rgba(139, 92, 246, 0.1), transparent 50%)',
+                pointerEvents: 'none',
+                animation: 'pulse 4s ease-in-out infinite'
+              }}></div>
+
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <div style={{
+                  width: '60px',
+                  height: '60px',
+                  margin: '0 auto 1rem',
+                  background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Camera size={32} color="white" />
+                </div>
+
+                <h3 style={{ fontSize: '1.3rem', marginBottom: '0.5rem', fontWeight: '700' }}>
+                  Analyze with AI
+                </h3>
+                <p style={{ color: '#94a3b8', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
+                  Click to process your receipt using Gemini AI
+                </p>
+
+                <button
+                  onClick={processReceipt}
+                  disabled={loading}
+                  style={{
+                    width: '100%',
+                    padding: '1rem 2rem',
+                    fontSize: '1rem',
+                    fontWeight: '700',
+                    background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '12px',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    transition: 'all 0.3s ease',
+                    opacity: loading ? 0.7 : 1,
+                    transform: loading ? 'scale(0.98)' : 'scale(1)'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) e.currentTarget.style.transform = 'scale(1.02)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading) e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                >
+                  {loading ? (
+                    <>
+                      <div className="spinner" style={{ width: '20px', height: '20px' }}></div>
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <Camera size={20} />
+                      Start Analysis
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           )}
-        </section>
-      </div>
 
+          {/* Error Message */}
+          {error && (
+            <div style={{
+              marginTop: '1rem',
+              padding: '1rem',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '8px',
+              color: '#ef4444',
+              fontSize: '0.9rem'
+            }}>
+              ⚠️ {error}
+            </div>
+          )}
+
+          {/* Receipt Card */}
+          {receiptData && (
+            <div>
+              <ReceiptCard data={receiptData} onChange={setReceiptData} />
+              <button
+                onClick={() => saveReceipt(receiptData)}
+                style={{
+                  width: '100%',
+                  marginTop: '1rem',
+                  padding: '1rem',
+                  background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '12px',
+                  fontWeight: '700',
+                  fontSize: '1rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem'
+                }}
+              >
+                <CreditCard size={18} />
+                Save Receipt
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Right Column - Insights & Recents */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          <InsightsChart receipts={recents} />
+
+          <div>
+            <h2 style={{ margin: '0 0 1rem', color: '#94a3b8', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              Recent Receipts
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '400px', overflowY: 'auto', paddingRight: '0.5rem' }}>
+              {recents.length === 0 ? (
+                <div style={{
+                  padding: '2rem',
+                  textAlign: 'center',
+                  color: '#64748b',
+                  fontStyle: 'italic',
+                  fontSize: '0.9rem',
+                  background: 'rgba(30, 41, 59, 0.3)',
+                  borderRadius: '8px',
+                  border: '1px dashed rgba(148, 163, 184, 0.2)'
+                }}>
+                  No receipts yet. Upload one to get started.
+                </div>
+              ) : (
+                recents.map(r => (
+                  <div
+                    key={r.id}
+                    className="glass-panel"
+                    style={{
+                      padding: '1rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      transition: 'all 0.2s ease',
+                      cursor: 'pointer'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(30, 41, 59, 0.8)';
+                      e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(30, 41, 59, 0.5)';
+                      e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.1)';
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: '600', fontSize: '0.95rem' }}>{r.merchant}</div>
+                      <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                        {r.date}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <div style={{ fontWeight: '700', color: 'var(--secondary)', fontSize: '1.1rem', minWidth: '80px', textAlign: 'right' }}>
+                        ₹{(Number(r.total || r.total_amount) || 0).toFixed(2)}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteReceipt(r.id);
+                        }}
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.1)',
+                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                          color: '#ef4444',
+                          cursor: 'pointer',
+                          padding: '8px',
+                          borderRadius: '8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s ease'
+                        }}
+                        className="delete-btn"
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                        }}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
   );
 }
