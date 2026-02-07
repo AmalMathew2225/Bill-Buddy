@@ -21,14 +21,26 @@ export default function Home() {
 
   useEffect(() => {
     const initializeUser = async () => {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (error || !user) {
-        router.push('/auth/login');
-        return;
+      try {
+        console.log("[v0] Starting initialization...");
+        const { data: { user }, error } = await supabase.auth.getUser();
+        console.log("[v0] Auth check result:", { user: user?.id, error });
+        
+        if (error || !user) {
+          console.log("[v0] No authenticated user, redirecting to login");
+          router.push('/auth/login');
+          return;
+        }
+        
+        setUser(user);
+        await loadReceipts(user.id);
+        console.log("[v0] Initialization complete");
+        setIsInitializing(false);
+      } catch (err) {
+        console.error("[v0] Initialization error:", err);
+        setError("Failed to initialize app");
+        setIsInitializing(false);
       }
-      setUser(user);
-      await loadReceipts(user.id);
-      setIsInitializing(false);
     };
 
     initializeUser();
@@ -122,8 +134,22 @@ export default function Home() {
   if (isInitializing) {
     return (
       <main className="container">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: '1rem' }}>
           <div className="spinner"></div>
+          <p style={{ color: '#94a3b8' }}>Loading your receipts...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (error && !user) {
+    return (
+      <main className="container">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+          <div style={{ color: '#ef4444', textAlign: 'center' }}>
+            <p>{error}</p>
+            <p style={{ marginTop: '1rem', color: '#94a3b8', fontSize: '0.9rem' }}>Please refresh the page or contact support.</p>
+          </div>
         </div>
       </main>
     );
