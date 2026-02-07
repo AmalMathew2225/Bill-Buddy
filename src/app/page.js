@@ -19,28 +19,52 @@ export default function Home() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [supabase, setSupabase] = useState(null);
 
+  console.log("[v0] Home component rendered with state:", { isInitializing, supabase: !!supabase, user: user?.id });
+
   // Initialize Supabase client
   useEffect(() => {
-    const client = createClient();
-    if (!client) {
-      console.log("[v0] Supabase not configured, running in local mode");
+    console.log("[v0] Supabase init effect starting");
+    try {
+      const client = createClient();
+      console.log("[v0] createClient returned:", !!client);
+      
+      if (!client) {
+        console.log("[v0] Supabase not configured, running in local mode");
+        setSupabase(null);
+        setIsInitializing(false);
+        return;
+      }
+      setSupabase(client);
+      console.log("[v0] Supabase client initialized successfully");
+    } catch (err) {
+      console.error("[v0] Supabase init error:", err.message);
       setSupabase(null);
       setIsInitializing(false);
-      return;
     }
-    setSupabase(client);
-    console.log("[v0] Supabase client initialized");
   }, []);
 
   // Initialize user session once supabase is ready
   useEffect(() => {
-    if (supabase === undefined) return; // Still initializing
+    console.log("[v0] User init effect - supabase state:", !!supabase, "isInitializing:", isInitializing);
+    
+    if (supabase === undefined) {
+      console.log("[v0] Supabase still undefined, waiting...");
+      return;
+    }
 
     const initializeUser = async () => {
       try {
-        console.log("[v0] Checking authentication...");
+        console.log("[v0] Starting user initialization");
+        
+        if (!supabase) {
+          console.log("[v0] No Supabase available, skipping auth check");
+          setIsInitializing(false);
+          return;
+        }
+
+        console.log("[v0] Checking authentication with Supabase...");
         const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-        console.log("[v0] Auth check result:", { authenticated: !!authUser, error: authError?.message });
+        console.log("[v0] Auth result:", { authenticated: !!authUser, errorMsg: authError?.message });
 
         if (authError || !authUser) {
           console.log("[v0] No user authenticated - running in demo mode");
@@ -53,6 +77,7 @@ export default function Home() {
         console.log("[v0] User authenticated:", authUser.id);
 
         // Load receipts from Supabase
+        console.log("[v0] Loading receipts from database...");
         const { data, error: dbError } = await supabase
           .from('receipts')
           .select('*')
@@ -63,11 +88,12 @@ export default function Home() {
           console.error("[v0] Database error:", dbError.message);
           setError('Failed to load receipts');
         } else {
-          console.log("[v0] Loaded receipts:", data?.length || 0);
+          console.log("[v0] Receipts loaded:", data?.length || 0);
           setRecents(data || []);
         }
 
         setIsInitializing(false);
+        console.log("[v0] User initialization complete");
       } catch (err) {
         console.error("[v0] Initialization error:", err);
         setIsInitializing(false);
@@ -75,9 +101,10 @@ export default function Home() {
     };
 
     if (supabase) {
+      console.log("[v0] Calling initializeUser");
       initializeUser();
     } else {
-      // No Supabase, run in demo mode
+      console.log("[v0] No supabase, setting isInitializing to false");
       setIsInitializing(false);
     }
   }, [supabase]);
@@ -272,6 +299,7 @@ export default function Home() {
 
   // Loading state
   if (isInitializing) {
+    console.log("[v0] Rendering loading state");
     return (
       <main className="container" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center', color: '#94a3b8' }}>
@@ -282,6 +310,8 @@ export default function Home() {
     );
   }
 
+  console.log("[v0] Rendering main page - file:", !!file, "receiptData:", !!receiptData, "recents:", recents.length);
+  
   return (
     <main className="container">
       <header style={{

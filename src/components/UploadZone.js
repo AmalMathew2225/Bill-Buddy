@@ -5,6 +5,7 @@ import { Upload, FileText, Image as ImageIcon, X, Camera } from 'lucide-react';
 import Webcam from 'react-webcam';
 
 export default function UploadZone({ onFileSelect }) {
+    console.log("[v0] UploadZone component rendering");
     const [isDragging, setIsDragging] = useState(false);
     const [preview, setPreview] = useState(null);
     const [isCameraOpen, setIsCameraOpen] = useState(false);
